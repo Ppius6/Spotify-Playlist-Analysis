@@ -1,0 +1,61 @@
+---
+title: "Spotify Playlist Analysis"
+date: 2023-09-14
+output: html_document
+---
+    
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{R}
+# Loading the libraries
+
+library(tidyverse)
+library(lintr)
+library(corrplot)
+library(caTools)
+library(fastDummies)
+library(olsrr)
+library(car)
+library(boot)
+library(MASS)
+library(caret)
+library(stats)
+library(tseries)
+library(forecast)
+library(rmarkdown)
+``` 
+
+```{R}
+# Loading the dataset
+Playlist = read.csv("playlist_2010to2022.csv")
+head(Playlist)
+```
+
+```{R}
+# Checking the structure of the dataset
+str(Playlist)
+```
+
+```{R}
+# Checking the summary of the dataset
+summary(Playlist)
+```
+
+```{R}
+# Checking the number of missing values in the dataset
+colSums(is.na(Playlist))
+```
+
+```{R}
+# Removing the missing values
+Playlist = Playlist[complete.cases(Playlist),]
+```
+
+```{R}
+# Checking the duplicates
+Playlist[duplicated(Playlist),]
+```
+
+```{R}
