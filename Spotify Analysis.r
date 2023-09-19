@@ -3,7 +3,6 @@ install.packages("tidyverse")
 install.packages("lintr")
 install.packages("corrplot")
 install.packages("caTools")
-install.packages("fastDummies")
 install.packages("olsrr")
 install.packages("car")
 install.packages("boot")
@@ -17,7 +16,6 @@ library(tidyverse)
 library(lintr)
 library(corrplot)
 library(caTools)
-library(fastDummies)
 library(olsrr)
 library(car)
 library(boot)
@@ -62,16 +60,16 @@ genre_count <- Playlist %>%
   group_by(artist_genres) %>%
   summarise(count = n()) %>%
   arrange(desc(count)) %>%
-  slice_head(n = 10)
+  slice_head(n = 20)
 
 print(genre_count)
 
-# Top 10 genre counts and ordering them in descending order
+# Top 20 genre counts and ordering them in descending order
 ggplot(genre_count, aes(x = reorder(artist_genres, count), y = count)) +
   geom_bar(stat = "identity", fill = "skyblue", color = "white") +
           coord_flip() + 
           labs(x = "Genre", y = "Count", 
-          title = "Top 10 Genres") +
+          title = "Top 20 Genres") +
           theme_minimal()
 
 
@@ -179,6 +177,13 @@ ggplot(Playlist, aes(x = track_popularity)) +
   theme_minimal() +
   theme(legend.position = "top")
 
+# Shapiro-Wilk Test
+shapiro.test(Playlist$track_popularity)
+
+# The p-value is less than 0.05, indicating that the target variable is not normally distributed. The null hypothesis in the Shapiro-Wilk test is that the data is normally distributed.
+# W = 0.83107: This is the test statistic value. A value close to 1 would indicate a distribution similar to the normal distribution. In this case, 0.83107 is somewhat deviated from 1, indicating a departure from normality.
+
+
 # Removing the outliers
 lower_limit <- mean_popularity - 3*std_popularity
 upper_limit <- mean_popularity + 3*std_popularity
@@ -194,6 +199,12 @@ ggplot(Playlist, aes(x = track_popularity)) +
   geom_line(stat = "density", color = "red") +
   theme_minimal() +
   labs(title = "Distribution of Track Popularity", x = "Track Popularity", y = "Density")
+
+# Shapiro-Wilk Test - After removing the outliers
+shapiro.test(Playlist$track_popularity)
+
+# W = 0.98923: The Shapiro-Wilk statistic is closer to 1 compared to your earlier test, which indicates that the distribution of track_popularity is closer to a normal distribution, but still not perfectly normal.
+# p-value = 5.576e-12: Although the W value has increased, the p-value is still significantly less than common alpha levels (like 0.05 or 0.01), indicating strong evidence against the null hypothesis of normality. You would reject the null hypothesis that the data comes from a normal distribution.
 
 # Convert year and genre to factors
 Playlist$year <- as.factor(Playlist$year)
@@ -215,14 +226,28 @@ Playlist$modern_rock_genre <- grepl("modern rock", Playlist$artist_genres, ignor
 
 # Build the linear regression model
 lm_model <- lm(track_popularity ~ year + artist_popularity + danceability + energy + acousticness + duration_ms + pop_genre + dance_pop_genre + rap_genre + pop_rap_genre + hip_hop_genre + rnb_genre + urban_contemporary_genre + trap_genre + southern_hip_hop_genre + modern_rock_genre, data = Playlist)
+
 summary(lm_model)
 
-# Checking for multicollinearity using Variance Inflation Factor (VIF)
-library(car)
-vif(lm_model)
-
 # Diagnostic plots to check assumptions
+par(mfrow = c(2,2))
 plot(lm_model)
+
+# Detecting outliers using Cook's distance
+cooksd <- cooks.distance(lm_model)
+plot(cooksd, pch = "*", cex = 2, main = "Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4*mean(cooksd, na.rm = TRUE), col = "red")  # add cutoff line
+
+# Print the influential observations
+influential_obs <- which(cooksd > 4*mean(cooksd, na.rm = TRUE))
+print(influential_obs)
+
+# Remove the influential observations
+Playlist <- Playlist[-influential_obs, ]
+
+# Build the linear regression model
+new_model <- lm(track_popularity ~ year + artist_popularity + danceability + energy + acousticness + duration_ms + pop_genre + dance_pop_genre + rap_genre + pop_rap_genre + hip_hop_genre + rnb_genre + urban_contemporary_genre + trap_genre + southern_hip_hop_genre + modern_rock_genre, data = Playlist)
+summary(new_model)
 
 # Step 1: Identify observations with large residuals
 large_residuals <- which(residuals(lm_model) < -2 | residuals(lm_model) > 2)
@@ -281,15 +306,8 @@ model_filtered <- lm(track_popularity ~ year2000 + year2001 + year2002 + year200
 summary(model_filtered)
 
 # Step 5: Plot the residuals of the new model to check if the issue has been resolved
+par(mfrow = c(2,2))
 plot(model_filtered)
-
-# Further Analysis of Residuals
-# Q-Q plot
-qqnorm(residuals(model_filtered))
-qqline(residuals(model_filtered))
-
-# Scale-Location plot
-plot(predict(model_filtered), residuals(model_filtered)/(1-hatvalues(model_filtered))^0.5)
 
 # Cross-Validation
 cv_model <- glm(track_popularity ~ year2000 + year2001 + year2002 + year2003 + 
