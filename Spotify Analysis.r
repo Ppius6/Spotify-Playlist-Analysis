@@ -51,12 +51,12 @@ Playlist[duplicated(Playlist),]
 # 2. Data Cleaning and EDA
 
 # Creating a separate genre DataFrame
-Playlist <- Playlist %>% 
+Playlist_genre <- Playlist %>% 
   mutate(artist_genres = strsplit(gsub("\\['|'\\]|'", "", artist_genres), ", ")) %>%
   unnest(artist_genres)
   
 # Count the number of occurrences of each genre
-genre_count <- Playlist %>%
+genre_count <- Playlist_genre %>%
   group_by(artist_genres) %>%
   summarise(count = n()) %>%
   arrange(desc(count)) %>%
@@ -168,10 +168,10 @@ std_popularity <- sd(Playlist$track_popularity)
 ggplot(Playlist, aes(x = track_popularity)) +
   geom_histogram(aes(y = ..density..), bins = 30, fill = "blue", alpha = 0.5) +
   geom_density(color = "black") +
-  geom_vline(aes(xintercept = mean_popularity), color = "red", linetype = "dashed", size = 1, show.legend = TRUE, label = "Mean") +
-  geom_vline(aes(xintercept = mean_popularity + 2*std_popularity), color = "green", linetype = "dashed", size = 1, show.legend = TRUE, label = "Mean ± 2 std dev") +
+  geom_vline(aes(xintercept = mean_popularity), color = "red", linetype = "dashed", size = 1, show.legend = TRUE) +
+  geom_vline(aes(xintercept = mean_popularity + 2*std_popularity), color = "green", linetype = "dashed", size = 1, show.legend = TRUE) +
   geom_vline(aes(xintercept = mean_popularity - 2*std_popularity), color = "green", linetype = "dashed", size = 1) +
-  geom_vline(aes(xintercept = mean_popularity + 3*std_popularity), color = "black", linetype = "dashed", size = 1, show.legend = TRUE, label = "Mean ± 3 std dev") +
+  geom_vline(aes(xintercept = mean_popularity + 3*std_popularity), color = "black", linetype = "dashed", size = 1, show.legend = TRUE) +
   geom_vline(aes(xintercept = mean_popularity - 3*std_popularity), color = "black", linetype = "dashed", size = 1) +
   labs(x = 'Track Popularity', y = 'Density', title = 'Distribution of Track Popularity') +
   theme_minimal() +
@@ -224,7 +224,7 @@ Playlist$trap_genre <- grepl("trap", Playlist$artist_genres, ignore.case = TRUE)
 Playlist$southern_hip_hop_genre <- grepl("southern hip hop", Playlist$artist_genres, ignore.case = TRUE)
 Playlist$modern_rock_genre <- grepl("modern rock", Playlist$artist_genres, ignore.case = TRUE)
 
-# Build the linear regression model
+# Approach A: Build the linear regression model
 lm_model <- lm(track_popularity ~ year + artist_popularity + danceability + energy + acousticness + duration_ms + pop_genre + dance_pop_genre + rap_genre + pop_rap_genre + hip_hop_genre + rnb_genre + urban_contemporary_genre + trap_genre + southern_hip_hop_genre + modern_rock_genre, data = Playlist)
 
 summary(lm_model)
@@ -245,15 +245,15 @@ print(influential_obs)
 # Remove the influential observations
 Playlist <- Playlist[-influential_obs, ]
 
-# Build the linear regression model
+# Approach B: Re-build the linear regression model
 new_model <- lm(track_popularity ~ year + artist_popularity + danceability + energy + acousticness + duration_ms + pop_genre + dance_pop_genre + rap_genre + pop_rap_genre + hip_hop_genre + rnb_genre + urban_contemporary_genre + trap_genre + southern_hip_hop_genre + modern_rock_genre, data = Playlist)
 summary(new_model)
 
-# Step 1: Identify observations with large residuals
-large_residuals <- which(residuals(lm_model) < -2 | residuals(lm_model) > 2)
+# Identify observations with large residuals
+# large_residuals <- which(residuals(lm_model) < -2 | residuals(lm_model) > 2)
 
-# Step 2: Filter out these observations from your dataset
-Playlist_filtered <- Playlist[-large_residuals, ]
+# Filter out these observations
+# Playlist_filtered <- Playlist[-large_residuals, ]
 
 # Convert categorical variables to numeric using one-hot encoding
 categorical_vars <- c("year", "pop_genre", "dance_pop_genre", "rap_genre", "pop_rap_genre", 
@@ -261,22 +261,23 @@ categorical_vars <- c("year", "pop_genre", "dance_pop_genre", "rap_genre", "pop_
                       "trap_genre", "southern_hip_hop_genre", "modern_rock_genre")
 
 for(var in categorical_vars){
-  Playlist_filtered[[var]] <- as.factor(Playlist_filtered[[var]])
+  Playlist[[var]] <- as.factor(Playlist[[var]])
 }
 
 # Check if the variables are converted to factors
-column_names <- colnames(Playlist_filtered)
+column_names <- colnames(Playlist)
+print(column_names)
 
 result_list <- list()
 for (column_name in column_names) {
-  result_list[[column_name]] <- is.factor(Playlist_filtered[[column_name]])
+  result_list[[column_name]] <- is.factor(Playlist[[column_name]])
 }
 
 print(result_list)
 
 # Remove unnecessary variables
 unnecessary_vars <- c("playlist_url", "track_id", "track_name", "album", "artist_id", "artist_name", "artist_genres")
-Playlist_filtered <- Playlist_filtered[ , !names(Playlist_filtered) %in% unnecessary_vars]
+Playlist_filtered <- Playlist[ , !names(Playlist) %in% unnecessary_vars]
 
 print(colnames(Playlist_filtered))
 
