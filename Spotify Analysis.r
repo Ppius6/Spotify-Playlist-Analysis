@@ -48,8 +48,6 @@ Playlist <- Playlist[complete.cases(Playlist),]
 # Checking the duplicates
 Playlist[duplicated(Playlist),]
 
-# 2. Data Cleaning and EDA
-
 # Creating a separate genre DataFrame
 Playlist_genre <- Playlist %>% 
   mutate(artist_genres = strsplit(gsub("\\['|'\\]|'", "", artist_genres), ", ")) %>%
@@ -60,7 +58,7 @@ genre_count <- Playlist_genre %>%
   group_by(artist_genres) %>%
   summarise(count = n()) %>%
   arrange(desc(count)) %>%
-  slice_head(n = 20)
+  slice_head(n = 10)
 
 print(genre_count)
 
@@ -72,6 +70,10 @@ ggplot(genre_count, aes(x = reorder(artist_genres, count), y = count)) +
           title = "Top 20 Genres") +
           theme_minimal()
 
+# Total number of unique genres
+total_genres <- Playlist_genre %>% 
+  summarise(total = n_distinct(artist_genres))
+print(total_genres)
 
 # Exploring artist popularity over the years
 Playlist %>%
@@ -161,37 +163,8 @@ ggplot(Playlist, aes(x = track_popularity)) +
   theme_minimal() +
   labs(title = "Distribution of Track Popularity", x = "Track Popularity", y = "Density")
 
-# Further exploring the outliers
-mean_popularity <- mean(Playlist$track_popularity)
-std_popularity <- sd(Playlist$track_popularity)
-
-ggplot(Playlist, aes(x = track_popularity)) +
-  geom_histogram(aes(y = ..density..), bins = 30, fill = "blue", alpha = 0.5) +
-  geom_density(color = "black") +
-  geom_vline(aes(xintercept = mean_popularity), color = "red", linetype = "dashed", size = 1, show.legend = TRUE) +
-  geom_vline(aes(xintercept = mean_popularity + 2*std_popularity), color = "green", linetype = "dashed", size = 1, show.legend = TRUE) +
-  geom_vline(aes(xintercept = mean_popularity - 2*std_popularity), color = "green", linetype = "dashed", size = 1) +
-  geom_vline(aes(xintercept = mean_popularity + 3*std_popularity), color = "black", linetype = "dashed", size = 1, show.legend = TRUE) +
-  geom_vline(aes(xintercept = mean_popularity - 3*std_popularity), color = "black", linetype = "dashed", size = 1) +
-  labs(x = 'Track Popularity', y = 'Density', title = 'Distribution of Track Popularity') +
-  theme_minimal() +
-  theme(legend.position = "top")
-
-# Shapiro-Wilk Test
-shapiro.test(Playlist$track_popularity)
-
-# The p-value is less than 0.05, indicating that the target variable is not normally distributed. The null hypothesis in the Shapiro-Wilk test is that the data is normally distributed.
-# W = 0.83107: This is the test statistic value. A value close to 1 would indicate a distribution similar to the normal distribution. In this case, 0.83107 is somewhat deviated from 1, indicating a departure from normality.
-
-
-# Removing the outliers
-lower_limit <- mean_popularity - 3*std_popularity
-upper_limit <- mean_popularity + 3*std_popularity
-print(lower_limit)
-print(upper_limit)
-
-Playlist <- Playlist %>%
-  filter(track_popularity > lower_limit & track_popularity < upper_limit)
+# Scaling the dataset
+scale(Playlist)
 
 # Checking the distribution and normality of the target variable
 ggplot(Playlist, aes(x = track_popularity)) +
@@ -200,19 +173,13 @@ ggplot(Playlist, aes(x = track_popularity)) +
   theme_minimal() +
   labs(title = "Distribution of Track Popularity", x = "Track Popularity", y = "Density")
 
-# Shapiro-Wilk Test - After removing the outliers
-shapiro.test(Playlist$track_popularity)
-
-# W = 0.98923: The Shapiro-Wilk statistic is closer to 1 compared to your earlier test, which indicates that the distribution of track_popularity is closer to a normal distribution, but still not perfectly normal.
-# p-value = 5.576e-12: Although the W value has increased, the p-value is still significantly less than common alpha levels (like 0.05 or 0.01), indicating strong evidence against the null hypothesis of normality. You would reject the null hypothesis that the data comes from a normal distribution.
-
 # Convert year and genre to factors
 Playlist$year <- as.factor(Playlist$year)
 
 # Creating a new column with the number of genres listed for each track
 Playlist$num_genres <- sapply(strsplit(Playlist$artist_genres, ", "), length)
 
-# Creating dummy variables for each top genre
+# Creating dummy variables for the top 10 genres
 Playlist$pop_genre <- grepl("pop", Playlist$artist_genres, ignore.case = TRUE)
 Playlist$dance_pop_genre <- grepl("dance pop", Playlist$artist_genres, ignore.case = TRUE)
 Playlist$rap_genre <- grepl("rap", Playlist$artist_genres, ignore.case = TRUE)
@@ -223,6 +190,8 @@ Playlist$urban_contemporary_genre <- grepl("urban contemporary", Playlist$artist
 Playlist$trap_genre <- grepl("trap", Playlist$artist_genres, ignore.case = TRUE)
 Playlist$southern_hip_hop_genre <- grepl("southern hip hop", Playlist$artist_genres, ignore.case = TRUE)
 Playlist$modern_rock_genre <- grepl("modern rock", Playlist$artist_genres, ignore.case = TRUE)
+
+str(Playlist)
 
 # Approach A: Build the linear regression model
 lm_model <- lm(track_popularity ~ year + artist_popularity + danceability + energy + acousticness + duration_ms + pop_genre + dance_pop_genre + rap_genre + pop_rap_genre + hip_hop_genre + rnb_genre + urban_contemporary_genre + trap_genre + southern_hip_hop_genre + modern_rock_genre, data = Playlist)
@@ -248,6 +217,10 @@ Playlist <- Playlist[-influential_obs, ]
 # Approach B: Re-build the linear regression model
 new_model <- lm(track_popularity ~ year + artist_popularity + danceability + energy + acousticness + duration_ms + pop_genre + dance_pop_genre + rap_genre + pop_rap_genre + hip_hop_genre + rnb_genre + urban_contemporary_genre + trap_genre + southern_hip_hop_genre + modern_rock_genre, data = Playlist)
 summary(new_model)
+
+# Diagnostic plots to check assumptions
+par(mfrow = c(2,2))
+plot(new_model)
 
 # Identify observations with large residuals
 # large_residuals <- which(residuals(lm_model) < -2 | residuals(lm_model) > 2)
@@ -288,7 +261,7 @@ print(colnames(Playlist_filtered))
 # Convert Playlist_filtered back to a data frame
 Playlist_filtered <- as.data.frame(Playlist_filtered)
 is.data.frame(Playlist_filtered)
-
+ 
 # Step 3: Rebuild the model with the filtered dataset
 model_filtered <- lm(track_popularity ~ year2000 + year2001 + year2002 + year2003 + 
                        year2004 + year2005 + year2006 + year2007 + year2008 + year2009 + 

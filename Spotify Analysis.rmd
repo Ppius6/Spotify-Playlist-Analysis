@@ -1,21 +1,26 @@
 ---
 title: "Spotify Playlist Analysis"
+author: Pius Mutuma Kimathi
 date: 2023-09-14
-output: html_document
+output: 
+    pdf_document: 
+        latex_engine: xelatex
+        dev: cairo_pdf
+        toc: yes
 ---
     
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{R}
 # Loading the libraries
 
+```{R}
+# Loading the libraries
 library(tidyverse)
 library(lintr)
 library(corrplot)
 library(caTools)
-library(fastDummies)
 library(olsrr)
 library(car)
 library(boot)
@@ -27,11 +32,14 @@ library(forecast)
 library(rmarkdown)
 ``` 
 
+
 ```{R}
 # Loading the dataset
 Playlist = read.csv("playlist_2010to2022.csv")
 head(Playlist)
 ```
+
+# Exploratory Data Analysis
 
 ```{R}
 # Checking the structure of the dataset
@@ -59,3 +67,389 @@ Playlist[duplicated(Playlist),]
 ```
 
 ```{R}
+# Creating a separate genre DataFrame
+Playlist_genre <- Playlist %>% 
+  mutate(artist_genres = strsplit(gsub("\\['|'\\]|'", "", artist_genres), ", ")) %>%
+  unnest(artist_genres)
+
+# Count the number of occurrences of each genre
+genre_count <- Playlist_genre %>%
+  group_by(artist_genres) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  slice_head(n = 10)
+
+print(genre_count)
+```
+    
+```{R}
+# Top 10 genre counts and ordering them in descending order
+ggplot(genre_count, aes(x = reorder(artist_genres, count), y = count)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "white") +
+          coord_flip() + 
+          labs(x = "Genre", y = "Count", 
+          title = "Top 20 Genres") +
+          theme_minimal()
+```
+
+```{R}
+# Total number of unique genres
+total_genres <- Playlist_genre %>% 
+  summarise(total = n_distinct(artist_genres))
+print(total_genres)
+```
+
+```{R}
+# Exploring artist popularity over the years
+Playlist %>%
+  group_by(year) %>%
+  summarise(avg_popularity = mean(artist_popularity)) %>%
+  ggplot(aes(x = year, y = avg_popularity)) +
+  geom_line() +
+  labs(x = "Year", 
+       y = "Average Popularity", 
+       title = "Artist Popularity Over the Years") +
+  theme_minimal()
+```
+
+```{R}
+# Exploring the popularity of songs over the years
+Playlist %>%
+  group_by(year) %>%
+  summarise(avg_popularity = mean(track_popularity)) %>%
+  ggplot(aes(x = year, y = avg_popularity)) +
+  geom_line() +
+  labs(x = "Year", 
+       y = "Average Popularity", 
+       title = "Song Popularity Over the Years") +
+  theme_minimal()
+```
+
+```{R}
+# Average song duration over the years
+Playlist %>%
+  group_by(year) %>%
+  summarise(avg_duration = mean(duration_ms / 60000)) %>%
+  ggplot(aes(x = year, y = avg_duration)) +
+  geom_line() +
+  labs(x = "Year", 
+        y = "Average Duration", 
+        title = "Song Duration Over the Years") +
+  theme_minimal()
+```
+
+```{R}
+# Correlation Heatmap
+corr_matrix <- cor(select_if(Playlist, is.numeric), use = "complete.obs")
+
+# Print the entire correlation matrix
+print(corr_matrix)
+
+# Print the correlation between each variable and track popularity
+track_popularity_corr <- corr_matrix[,'track_popularity']
+print(track_popularity_corr)
+
+# Plot the correlation matrix
+corrplot::corrplot(corr_matrix)
+```
+
+```{R}
+# Track popularity vs Artist popularity
+Playlist %>%
+  ggplot(aes(x = artist_popularity, y = track_popularity)) +
+  geom_point() +
+  labs(x = "Artist Popularity", 
+        y = "Track Popularity", 
+        title = "Track Popularity vs Artist Popularity") +
+  geom_smooth(method = "lm") +
+  theme_minimal()
+```
+
+```{R}
+# Track popularity vs Danceability
+Playlist %>%
+  ggplot(aes(x = danceability, y = track_popularity)) +
+  geom_point() +
+  labs(x = "Danceability", 
+        y = "Track Popularity", 
+        title = "Track Popularity vs Danceability") +
+    geom_smooth(method = "lm") +
+    theme_minimal()
+```
+
+```{R}
+# Exploring the distribution of the features
+Playlist %>%
+  select_if(is.numeric) %>%
+  gather() %>%
+  ggplot(aes(value)) +
+  geom_histogram(fill = "skyblue", color = "white", alpha = 0.7) +
+  facet_wrap(~key, scales = "free") +
+  theme_minimal() +
+    labs(title = "Distribution of Various Features", x = "Value", y = "Frequency")
+```
+
+# Hypothesis Formulation
+
+H1: Songs with higher danceability are more popular.
+H2: Over the years, the average duration of popular songs has decreased.
+H3: Artist popularity is a significant predictor of track popularity.
+
+# Feature Engineering and Model Building
+
+```{R}
+# Checking the distribution and normality of the target variable
+ggplot(Playlist, aes(x = track_popularity)) +
+  geom_histogram(fill = "skyblue", color = "white", alpha = 0.7, binwidth = 2, aes(y = after_stat(density))) +
+  geom_line(stat = "density", color = "red") +
+  theme_minimal() +
+  labs(title = "Distribution of Track Popularity", x = "Track Popularity", y = "Density")
+```
+
+```{R}
+# Checking the distribution and normality of the target variable
+ggplot(Playlist, aes(x = track_popularity)) +
+  geom_histogram(fill = "skyblue", color = "white", alpha = 0.7, binwidth = 2, aes(y = after_stat(density))) +
+  geom_line(stat = "density", color = "red") +
+  theme_minimal() +
+  labs(title = "Distribution of Track Popularity", x = "Track Popularity", y = "Density")
+```
+
+```{R}
+# Convert year and genre to factors
+Playlist$year <- as.factor(Playlist$year)
+
+# Creating a new column with the number of genres listed for each track
+Playlist$num_genres <- sapply(strsplit(Playlist$artist_genres, ", "), length)
+
+# Creating dummy variables for the top 10 genres
+Playlist$pop_genre <- grepl("pop", Playlist$artist_genres, ignore.case = TRUE)
+Playlist$dance_pop_genre <- grepl("dance pop", Playlist$artist_genres, ignore.case = TRUE)
+Playlist$rap_genre <- grepl("rap", Playlist$artist_genres, ignore.case = TRUE)
+Playlist$pop_rap_genre <- grepl("pop rap", Playlist$artist_genres, ignore.case = TRUE)
+Playlist$hip_hop_genre <- grepl("hip hop", Playlist$artist_genres, ignore.case = TRUE)
+Playlist$rnb_genre <- grepl("r&b", Playlist$artist_genres, ignore.case = TRUE)
+Playlist$urban_contemporary_genre <- grepl("urban contemporary", Playlist$artist_genres, ignore.case = TRUE)
+Playlist$trap_genre <- grepl("trap", Playlist$artist_genres, ignore.case = TRUE)
+Playlist$southern_hip_hop_genre <- grepl("southern hip hop", Playlist$artist_genres, ignore.case = TRUE)
+Playlist$modern_rock_genre <- grepl("modern rock", Playlist$artist_genres, ignore.case = TRUE)
+
+str(Playlist)
+```
+
+
+```{R}
+# Scaling the dataset
+Playlist <- Playlist %>%
+  mutate(across(where(is.numeric), scale))
+```
+
+## Approach A: Build the linear regression model
+
+```{R}
+lm_model <- lm(track_popularity ~ year + artist_popularity + danceability + energy + acousticness + duration_ms + pop_genre + dance_pop_genre + rap_genre + pop_rap_genre + hip_hop_genre + rnb_genre + urban_contemporary_genre + trap_genre + southern_hip_hop_genre + modern_rock_genre, data = Playlist)
+
+summary(lm_model)
+```
+
+```{R}
+# Diagnostic plots to check assumptions
+par(mfrow = c(2,2))
+plot(lm_model)
+```
+
+```{R}
+# Detecting outliers using Cook's distance
+cooksd <- cooks.distance(lm_model)
+plot(cooksd, pch = "*", cex = 2, main = "Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4*mean(cooksd, na.rm = TRUE), col = "red")  # add cutoff line
+
+# Print the influential observations
+influential_obs <- which(cooksd > 4*mean(cooksd, na.rm = TRUE))
+print(influential_obs)
+
+# Remove the influential observations
+Playlist <- Playlist[-influential_obs, ]
+```
+
+```{R}
+# Approach B: Re-build the linear regression model
+new_model <- lm(track_popularity ~ year + artist_popularity + danceability + energy + acousticness + duration_ms + pop_genre + dance_pop_genre + rap_genre + pop_rap_genre + hip_hop_genre + rnb_genre + urban_contemporary_genre + trap_genre + southern_hip_hop_genre + modern_rock_genre, data = Playlist)
+summary(new_model)
+```
+
+```{R}
+# Diagnostic plots to check assumptions
+par(mfrow = c(2,2))
+plot(new_model)
+```
+
+```{R}
+# Convert categorical variables to numeric using one-hot encoding
+categorical_vars <- c("year", "pop_genre", "dance_pop_genre", "rap_genre", "pop_rap_genre", 
+                      "hip_hop_genre", "rnb_genre", "urban_contemporary_genre", 
+                      "trap_genre", "southern_hip_hop_genre", "modern_rock_genre")
+
+for(var in categorical_vars){
+  Playlist[[var]] <- as.factor(Playlist[[var]])
+}
+```
+
+```{R}
+# Check if the variables are converted to factors
+column_names <- colnames(Playlist)
+print(column_names)
+
+result_list <- list()
+for (column_name in column_names) {
+  result_list[[column_name]] <- is.factor(Playlist[[column_name]])
+}
+
+print(result_list)
+```
+
+```{R}
+# Remove unnecessary variables
+unnecessary_vars <- c("playlist_url", "track_id", "track_name", "album", "artist_id", "artist_name", "artist_genres")
+Playlist_filtered <- Playlist[ , !names(Playlist) %in% unnecessary_vars]
+
+# Encoding categorical variables using one-hot encoding - model.matrix()
+Playlist_filtered <- model.matrix(~ . - 1, data = Playlist_filtered)
+
+# Convert Playlist_filtered back to a data frame
+Playlist_filtered <- as.data.frame(Playlist_filtered)
+is.data.frame(Playlist_filtered)
+```
+
+## Approach B: Re-build the linear regression model with added features
+
+```{R}
+model_filtered <- lm(track_popularity ~ year2000 + year2001 + year2002 + year2003 + 
+                       year2004 + year2005 + year2006 + year2007 + year2008 + year2009 + 
+                       year2010 + year2011 + year2012 + year2013 + year2014 + year2015 + 
+                       year2016 + year2017 + year2018 + year2019 + year2020 + year2021 + 
+                       year2022 + artist_popularity + danceability + energy + key + 
+                       loudness + mode + speechiness + acousticness + instrumentalness + 
+                       liveness + valence + tempo + duration_ms + time_signature + 
+                       pop_genreTRUE + dance_pop_genreTRUE + rap_genreTRUE + 
+                       pop_rap_genreTRUE + hip_hop_genreTRUE + rnb_genreTRUE + 
+                       urban_contemporary_genreTRUE + trap_genreTRUE + 
+                       southern_hip_hop_genreTRUE + modern_rock_genreTRUE, 
+                       data = Playlist_filtered)
+
+# Step 4: Check the summary of the new model
+summary(model_filtered)
+```
+
+```{R}
+# Plot the residuals of the new model to check if the issue has been resolved
+par(mfrow = c(2,2))
+plot(model_filtered)
+```
+
+# Cross Validation
+
+```{R}
+cv_model <- glm(track_popularity ~ year2000 + year2001 + year2002 + year2003 + 
+                     year2004 + year2005 + year2006 + year2007 + year2008 + year2009 + 
+                     year2010 + year2011 + year2012 + year2013 + year2014 + year2015 + 
+                     year2016 + year2017 + year2018 + year2019 + year2020 + year2021 + 
+                     year2022 + artist_popularity + danceability + energy + key + 
+                     loudness + mode + speechiness + acousticness + instrumentalness + 
+                     liveness + valence + tempo + duration_ms + time_signature + 
+                     num_genres + pop_genreTRUE + dance_pop_genreTRUE + rap_genreTRUE + 
+                     pop_rap_genreTRUE + hip_hop_genreTRUE + rnb_genreTRUE + 
+                     urban_contemporary_genreTRUE + trap_genreTRUE + 
+                     southern_hip_hop_genreTRUE + modern_rock_genreTRUE, 
+                     data = Playlist_filtered)
+
+set.seed(123) # for reproducibility
+K <- 10 # number of folds
+cv_results <- cv.glm(Playlist_filtered, cv_model, K = K)
+
+print(cv_results)
+```
+
+```{R}
+# Evaluating the model (RMSE, MAE)
+data.frame(RMSE = sqrt(mean(residuals(model_filtered)^2)), 
+          MAE = mean(abs(residuals(model_filtered))))
+```
+
+# Forecasting Using Time Series Analysis
+
+```{R}
+# Time Series Analysis - (decreasing trend in the average duration of songs over the years)
+# Melting the data to get year column
+Playlist_filtered_long <- Playlist_filtered %>%
+  pivot_longer(cols = starts_with("year"), names_to = "year", values_to = "value") %>%
+  filter(value == 1)
+
+Playlist_filtered_long$year <- substr(Playlist_filtered_long$year, 5, 8)
+
+avg_duration_per_year <- Playlist_filtered_long %>%
+  group_by(year) %>%
+  summarize(avg_duration = mean(duration_ms, na.rm = TRUE))
+
+# Converting to time series object
+time_series_data <- ts(avg_duration_per_year$avg_duration, start = min(avg_duration_per_year$year), end = max(avg_duration_per_year$year), frequency = 1)
+print(time_series_data)
+```
+
+```{R}
+# Create a date sequence
+date_seq <- seq.Date(from = as.Date("2000-01-01"), to = as.Date("2022-12-01"), by = "month")
+year_seq_numeric <- seq(2000, 2022, length.out = length(date_seq))
+
+# Interpolate the monthly data points
+# Assuming avg_duration_per_year is a data frame with columns 'year' and 'avg_duration'
+year_seq <- seq(2000, 2022)
+avg_duration_seq <- avg_duration_per_year$avg_duration
+
+monthly_avg_duration <- approx(year_seq, avg_duration_seq, xout = year_seq_numeric, method = "linear")$y
+
+# Create a time series object
+time_series_data <- ts(monthly_avg_duration, start = c(2000, 1), frequency = 12)
+
+# Decompose the time series
+decomposed_data <- decompose(time_series_data)
+
+# Plot the decomposed data
+plot(decomposed_data)
+```
+
+```{R}
+# Check if the time series is stationary
+# Conduct the Augmented Dickey-Fuller Test
+adf_test <- adf.test(time_series_data, alternative = "stationary")
+print(adf_test)
+```
+
+The output of the Augmented Dickey-Fuller test indicates that the time series is stationary. The p-value is 0.01, which is less than the common significance level of 0.05, allowing us to reject the null hypothesis that the time series has a unit root (i.e., is non-stationary).
+
+```{R}
+# Differencing the time series
+diff_time_series_data <- diff(time_series_data)
+
+# Use auto.arima to automatically select the best ARIMA model
+best_model <- auto.arima(time_series_data)
+
+# Forecast the next 12 months
+forecast_result <- forecast(best_model, h = 12)
+
+# Plot the forecast
+plot(forecast_result)
+```
+
+# Conclusion
+The hypothesis was formulated as shown below:
+
+H1: Songs with higher danceability are more popular. 
+H2: Over the years, the average duration of popular songs has decreased.
+H3: Artist popularity is a significant predictor of track popularity.
+
+Songs with a higher danceability are not popular. Also, based on the regression models, while there is a positive association between danceability and track popularity, it is not statistically significant. Therefore, it cannot be confidently stated that songs with higher danceability are more popular based on this specific dataset and model.
+The average duration of popular songs has decreased over the years. While there is some fluctuation in the middle years, the overall trend from 2000 to 2022 appears to be decreasing. Given this downward trend, the time series data does seem to support the hypothesis that the average duration (or possibly the popularity) of songs has decreased over the years.
+Artist popularity is a significant predictor of track popularity. There is a positive correlation between artist popularity and genre popularity. Also, The p-value for duration_ms is less than the 0.05 significance level. Therefore, the relationship between song duration and track popularity is statistically significant.
+
+The forecasted average duration of popular songs for the next 12 months is seen to be on a growing trend. 
